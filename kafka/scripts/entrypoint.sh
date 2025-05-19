@@ -17,6 +17,7 @@ server_config="/opt/kafka/config/kraft/server.properties"
 server_custom_config="/opt/kafka/config/custom-config/server.properties"
 broker_custom_config="/opt/kafka/config/custom-config/broker.properties"
 controller_custom_config="/opt/kafka/config/custom-config/controller.properties"
+tiered_storage_config="/opt/kafka/config/custom-config/tiered-storage.properties"
 custom_log4j_config="/opt/kafka/config/custom-config/log4j.properties"
 custom_tools_log4j_config="/opt/kafka/config/custom-config/tools-log4j.properties"
 # Utility variables
@@ -108,6 +109,10 @@ elif [[ $roles = "broker" ]]; then
 else [[ $roles = "controller,broker" ]]
   /opt/kafka/config/merge_custom_config.sh $server_custom_config $operator_config $kafka_config_dir/config.properties.merged
 fi
+# If a file named $tiered_storage_config exists, it merges the file with the operator configuration file.
+if [[ -f $tiered_storage_config ]]; then
+  /opt/kafka/config/merge_custom_config.sh $tiered_storage_config $operator_config $kafka_config_dir/config.properties.merged
+fi
 
 # If a file named $temp_clientauth_config exists, it copies the file to /opt/kafka/config directory.
 if [[ -f $temp_clientauth_config ]]; then
@@ -123,6 +128,16 @@ if [[ $KAFKA_PASSWORD != "" ]]; then
   
   sed -i "s/KAFKA_USER\>/"$KAFKA_USER"/g" $operator_config
   sed -i "s/\<KAFKA_PASSWORD\>/"$KAFKA_PASSWORD"/g" $operator_config
+fi
+# tiered storage backend credentials
+if [[ $AZURE_ACCOUNT_KEY != "" ]]; then
+  sed -i "s|\<AZURE_ACCOUNT_KEY\>|"$AZURE_ACCOUNT_KEY"|g" $operator_config
+fi
+if [[ $AWS_ACCESS_KEY_ID != "" ]]; then
+  sed -i "s|\<AWS_ACCESS_KEY_ID\>|"$AWS_ACCESS_KEY_ID"|g" $operator_config
+fi
+if [[ $AWS_SECRET_ACCESS_KEY != "" ]]; then
+  sed -i "s|\<AWS_SECRET_ACCESS_KEY\>|"$AWS_SECRET_ACCESS_KEY"|g" $operator_config
 fi
 
 # Reads operator configuration file line by line and sets the values of the keys as environment variables.
@@ -186,16 +201,6 @@ fi
 
 remove_comments_and_sort "$final_config"
 
-# Keeping this for backward compatibility
-if grep -Eqi '^sasl\.enabled\.mechanisms=.*plain.*' "$final_config" && \
-   ! grep -Eq '^listener\.name\.broker\.plain\.sasl\.jaas\.config=.*' "$final_config" && \
-   ! grep -Eq '^listener\.name\.local\.plain\.sasl\.jaas\.config=.*' "$final_config" && \
-   ! grep -Eq '^listener\.name\.controller\.plain\.sasl\.jaas\.config=.*' "$final_config"; then
-  AUTHFILE="/opt/kafka/config/kafka_server_jaas.conf"
-  sed -i "s/KAFKA_USER\>/"$KAFKA_USER"/g" $AUTHFILE
-  sed -i "s/\<KAFKA_PASSWORD\>/"$KAFKA_PASSWORD"/g" $AUTHFILE
-  export KAFKA_OPTS="$KAFKA_OPTS -Djava.security.auth.login.config=$AUTHFILE"
-fi
 # If user has provided custom log4j configuration, it will be used
 if [[ -f "$custom_log4j_config" ]]; then
   cp "$custom_log4j_config" /opt/kafka/config
