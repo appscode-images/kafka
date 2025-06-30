@@ -1,3 +1,5 @@
+#!/bin/bash
+
 KAFKA_CLUSTER_ID="$(opt/kafka/bin/kafka-storage.sh random-uuid)"
 TOPIC="test-topic"
 
@@ -26,7 +28,7 @@ opt/kafka/bin/kafka-console-consumer.sh --topic $TOPIC --from-beginning --bootst
 opt/kafka/bin/kafka-server-stop.sh
 
 # Wait until jsa file is generated
-TIMEOUT=20
+TIMEOUT=100
 until [ -f /kafka.jsa ]
 do
     check_timeout
