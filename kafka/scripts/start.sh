@@ -1,39 +1,60 @@
 #!/bin/bash
 
-final_config="$1"
-export KAFKA_CLUSTER_ID=${KAFKA_CLUSTER_ID:-4L6g3nShT-eMCtK--X86sw}
+set -o errexit
+set -o nounset
+set -o pipefail
+# set -o xtrace # Uncomment this line for debugging purposes
 
-declare -A scram_sha_256
-declare -A scram_sha_512
+. /opt/kafka/scripts/lib.sh
+
+debug "** Starting Kafka storage formatting and run server **"
+
+final_config="$1"
+
 storage_args=("--cluster-id" "$KAFKA_CLUSTER_ID" "--config" "$final_config" "--ignore-formatted")
-sparse_scram_credentials() {
-  local -n scram="$1"
-  local pat="$2"
-  while IFS= read -r line; do
-      username=$(echo "$line" | awk -F 'username=' '{print $2}' | awk -F ' ' '{print $1}' | sed 's/[";]//g')
-      password=$(echo "$line" | awk -F 'password=' '{print $2}' | awk -F ' ' '{print $1}' | sed 's/[";]//g')
-      scram["$username"]="$password"
-  done < <(grep -E "$pat" "$final_config")
-}
-add_scram_storage_args() {
-  local -n scram="$1"
-  local algo="$2"
-  algo_env="${algo//-/_}"
-  user_env="KAFKA_${algo_env}_USER"
-  pass_env="KAFKA_${algo_env}_PASSWORD"
-  if [[ -n "${!user_env}" && -n "${!pass_env}" ]]; then
-    scram["${!user_env}"]="${!pass_env}"
-  fi
-  for username in "${!scram[@]}"; do
-    storage_args+=("--add-scram" "$algo=[name=$username,password=${scram[$username]}]")
+add_scram_credentials() {
+  for (( i = 0; i < 2; i++ )); do
+    algo_type="$((256 + i * 256))"
+    users_var="KAFKA_SCRAM_${algo_type}_USERS"
+    passwords_var="KAFKA_SCRAM_${algo_type}_PASSWORDS"
+
+    users_value="${!users_var:-}"
+    passwords_value="${!passwords_var:-}"
+
+    if [[ -n "$users_value" && -n "$passwords_value" ]]; then
+      debug "Adding SCRAM-SHA-${algo_type} credentials"
+      IFS=',' read -ra users <<< "$users_value"
+      IFS=',' read -ra passwords <<< "$passwords_value"
+      for index in "${!users[@]}"; do
+        if [[ -n "${users[$index]}" && -n "${passwords[$index]}" ]]; then
+          storage_args+=("--add-scram" "SCRAM-SHA-${algo_type}=[name=${users[$index]},password=${passwords[$index]}]")
+        fi
+      done
+    fi
   done
 }
-sparse_scram_credentials scram_sha_256 "listener\.[^ ]*\.scram-sha-256\.sasl\.jaas\.config"
-add_scram_storage_args scram_sha_256 "SCRAM-SHA-256"
-sparse_scram_credentials scram_sha_512 "listener\.[^ ]*\.scram-sha-512\.sasl\.jaas\.config"
-add_scram_storage_args scram_sha_512 "SCRAM-SHA-512"
 
-echo "Formatting storage"
+# Add SCRAM credentials if provided
+add_scram_credentials
+# TODO(): Add support for dynamic quorum changes
+#  https://cwiki.apache.org/confluence/display/KAFKA/KIP-853%3A+KRaft+Controller+Membership+Changes#:~:text=In%20this%20case%2C%20the%20controller,the%20beginning%20of%20this%20section.
+
+# Make a temp env variable to store user provided performance otps
+if [[ -z "${KAFKA_JVM_PERFORMANCE_OPTS-}" ]]; then
+    export TEMP_KAFKA_JVM_PERFORMANCE_OPTS=""
+else
+    export TEMP_KAFKA_JVM_PERFORMANCE_OPTS="$KAFKA_JVM_PERFORMANCE_OPTS"
+fi
+# We will first use CDS for storage to format storage
+export KAFKA_JVM_PERFORMANCE_OPTS="${KAFKA_JVM_PERFORMANCE_OPTS-} -XX:SharedArchiveFile=/opt/kafka/storage.jsa"
+
+info "** Formatting storage **"
 kafka-storage.sh format "${storage_args[@]}"
-echo "Starting Kafka Server"
+
+# Using temp env variable to get rid of storage CDS command
+export KAFKA_JVM_PERFORMANCE_OPTS="$TEMP_KAFKA_JVM_PERFORMANCE_OPTS"
+# Now we will use CDS for kafka to start kafka server
+export KAFKA_JVM_PERFORMANCE_OPTS="$KAFKA_JVM_PERFORMANCE_OPTS -XX:SharedArchiveFile=/opt/kafka/kafka.jsa"
+
+info ** "Starting Kafka Server **"
 exec kafka-server-start.sh "$final_config"

@@ -88,5 +88,7 @@ else [[ $CONNECT_CLUSTER_MODE = "distributed" ]]
     remove_comments_and_sort $connect_distributed_config
     
     echo "Starting Kafka Connect in Distributed mode"
+    cat "$connect_distributed_config"
+    echo "Using configuration file: $connect_distributed_config"
     exec connect-distributed.sh $connect_distributed_config
 fi

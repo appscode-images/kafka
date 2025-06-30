@@ -1,5 +1,5 @@
 # Build cruise control image to get the metrics reporter jar file
-FROM eclipse-temurin:17.0.10_7-jdk AS cruise_control
+FROM eclipse-temurin:21-jdk AS cruise_control
 ARG CC_VERSION
 
 # Fetch Cruise-Control binary
@@ -31,59 +31,91 @@ RUN set -eux \
     && ./gradlew clean \
     && ./gradlew jar :cruise-control-metric-reporter:jar
 
-FROM eclipse-temurin:17.0.10_7-jdk
+# Build kafka jsa files
+# This part is used from kafka official docker image
+FROM eclipse-temurin:21-jre-alpine AS build-jsa
+
+USER root
+
+# Get kafka from https://archive.apache.org/dist/kafka and pass the url through build arguments
+ARG KAFKA_URL
+
+COPY jsa_start.sh /opt/kafka/jsa_start.sh
+
+RUN set -eux ; \
+    apk update ; \
+    apk upgrade ; \
+    apk add --no-cache wget gcompat gpg gpg-agent procps bash; \
+    mkdir -p /opt/kafka; \
+    wget -nv -O kafka.tgz "$KAFKA_URL"; \
+    wget -nv -O kafka.tgz.asc "$KAFKA_URL.asc"; \
+    tar xfz kafka.tgz -C /opt/kafka --strip-components 1; \
+    wget -nv -O KEYS https://downloads.apache.org/kafka/KEYS; \
+    gpg --import KEYS; \
+    gpg --batch --verify kafka.tgz.asc kafka.tgz
+
+# Generate jsa files using dynamic CDS for kafka server start command and kafka storage format command
+RUN /opt/kafka/jsa_start.sh
+
+FROM eclipse-temurin:21-jre
 
 ARG KAFKA_VERSION
 ARG SCALA_VERSION
-ARG KAFKA_REGISTRY
+ARG KAFKA_URL
 ARG CC_VERSION
 ARG TARGETARCH
 ENV HOME=/opt/kafka
 ENV PATH=${PATH}:${HOME}/bin
 
 LABEL name="kafka" version=${KAFKA_VERSION}
-LABEL org.opencontainers.image.source=https://github.com/kubedb/kafka-docker
+LABEL org.opencontainers.image.source=https://github.com/appscode-images/kafka
 
-RUN apt-get update && apt-get upgrade -y \
- && apt-get install -y wget nano \
- && wget -O /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz ${KAFKA_REGISTRY}/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
- && tar xfz /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz -C /opt \
- && rm /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
- && mv /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION} ${HOME} \
- && rm -rf /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
- && rm -rf ${HOME}/bin/windows ${HOME}/site-docs \
- && latest_version=$(curl -s https://api.github.com/repos/deviceinsight/kafkactl/releases/latest | grep "tag_name" | cut -d '"' -f 4 | sed 's/^v//') \
- && curl -LO "https://github.com/deviceinsight/kafkactl/releases/download/v${latest_version}/kafkactl_${latest_version}_linux_${TARGETARCH}.deb" \
- && dpkg -i kafkactl_${latest_version}_linux_${TARGETARCH}.deb \
- && rm kafkactl_${latest_version}_linux_${TARGETARCH}.deb
+# Install dependencies
+# Create a non-root user with uid 1001
+# Download and extract Kafka from the provided KAFKA_URL
+# Set the home directory to /opt/kafka
+# Install kafkactl from deviceinsight/kafkactl
+# Remove unnecessary directories and files
+# Clean up apt cache and set permissions for the kafka user
+# Set permissions for the home directory to allow group access
+# OpenShifter requires the user to be in group 0 (root) to allow access to the mounted volumes
+RUN apt-get update && apt-get upgrade -y ; \
+    apt-get install -y wget nano ; \
+    mkdir -p ${HOME}; \
+    groupadd -r -g 1001 kafka; \
+    useradd -m -d $HOME -s /bin/bash -u 1001 -r -g kafka kafka ; \
+    wget -nv -O /tmp/kafka.tgz ${KAFKA_URL}; \
+    tar xfz /tmp/kafka.tgz -C ${HOME} --strip-components 1; \
+    rm /tmp/kafka.tgz; \
+    rm -rf ${HOME}/bin/windows ${HOME}/site-docs ; \
+    latest_version=$(curl -s https://api.github.com/repos/deviceinsight/kafkactl/releases/latest | grep "tag_name" | cut -d '"' -f 4 | sed 's/^v//') ; \
+    curl -LO "https://github.com/deviceinsight/kafkactl/releases/download/v${latest_version}/kafkactl_${latest_version}_linux_${TARGETARCH}.deb" ; \
+    dpkg -i kafkactl_${latest_version}_linux_${TARGETARCH}.deb ; \
+    rm kafkactl_${latest_version}_linux_${TARGETARCH}.deb ; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /var/log/kafka; \
+    chown -R kafka:0 $HOME /var/log/kafka; \
+    chmod -R g=u $HOME
 
 # Placing the Cruise Control metric reporter jar into the /opt/kafka/libs/ directory of every Kafka broker
 # allows Kafka to find the reporter at runtime
 COPY --from=cruise_control /opt/cruise-control/cruise-control-metrics-reporter/build/libs/cruise-control-metrics-reporter-${CC_VERSION}.jar /opt/kafka/libs/cruise-control-metrics-reporter.jar
-COPY scripts/* /opt/kafka/config/
-COPY ./kafka_server_jaas.conf /opt/kafka/config
+COPY --from=build-jsa kafka.jsa /opt/kafka/kafka.jsa
+COPY --from=build-jsa storage.jsa /opt/kafka/storage.jsa
+# Copy scripts directory to the home directory of the container
+COPY scripts/ ${HOME}/scripts/
+
 # Add Prometheus JMX exporter agent
 COPY ./jmx-exporter-config.yaml /opt/jmx_exporter/jmx-exporter-config.yaml
 RUN wget -O /opt/jmx_exporter/jmx_prometheus_javaagent-0.20.0.jar https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
 ENV EXTRA_ARGS="$EXTRA_ARGS -javaagent:/opt/jmx_exporter/jmx_prometheus_javaagent-0.20.0.jar=56790:/opt/jmx_exporter/jmx-exporter-config.yaml"
 ENV KAFKA_JMX_OPTS="-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=127.0.0.1"
 
-# use kafka non-root user with uid 1001
-RUN groupadd -r -g 1001 kafka && \
-    useradd -m -d $HOME -s /bin/bash -u 1001 -r -g kafka kafka && \
-    chown -R kafka:kafka $HOME
-
-# For OpenShift, we need to set the group to 0 and the directory permissions to g=u
-RUN chgrp -R 0 $HOME && \
-    chmod -R g=u $HOME
-
 USER kafka
 
-RUN ["chmod", "+x", "/opt/kafka/config/entrypoint.sh"]
-RUN ["chmod", "+x", "/opt/kafka/config/merge_custom_config.sh"]
-RUN ["chmod", "+x", "/opt/kafka/config/start.sh"]
-
 WORKDIR $HOME
-EXPOSE 9092 9093 9094 29092
+EXPOSE 9092 9093
 
-ENTRYPOINT ["/opt/kafka/config/entrypoint.sh"]
+ENTRYPOINT ["/opt/kafka/scripts/entrypoint.sh"]
+CMD ["/opt/kafka/scripts/setup.sh"]

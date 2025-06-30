@@ -1,5 +1,5 @@
 # --------------- Builder stage ---------------
-FROM eclipse-temurin:17.0.10_7-jdk AS cruisecontrol
+FROM eclipse-temurin:21-jdk AS cruisecontrol
 
 ARG CC_VERSION
 
@@ -57,13 +57,10 @@ RUN set -eux \
     && npm run build
 
 # --------------- Final stage ---------------
-FROM eclipse-temurin:17.0.10_7-jdk
+FROM eclipse-temurin:21-jre
 
 ENV HOME=/opt/cruise-control
 WORKDIR $HOME
-
-RUN apt-get update \
-    && apt-get upgrade -y
 
 COPY --from=cruisecontrol /opt/cruise-control/cruise-control/build/libs/* /opt/cruise-control/cruise-control/build/libs/
 COPY --from=cruisecontrol /opt/cruise-control/config /opt/cruise-control/config
@@ -74,20 +71,22 @@ COPY --from=cruisecontrol_ui /opt/cruise-control-ui/dist /opt/cruise-control/cru
 COPY /scripts/entrypoint.sh /opt/cruise-control/config/entrypoint.sh
 COPY /scripts/merge_custom_config.sh /opt/cruise-control/config/merge_custom_config.sh
 
-RUN groupadd -r -g 1001 cruise-control && \
-    useradd -m -d $HOME -s /bin/bash -u 1001 -r -g cruise-control cruise-control && \
-    chown -R cruise-control:cruise-control $HOME
-# For OpenShift, we need to set the group to 0 and the directory permissions to g=u
-RUN chgrp -R 0 $HOME && \
-    chmod -R g=u $HOME
+# Update dependencies and create a non-root user
+# Add permissions for the home directory
+# Set the group to 0 and the directory permissions to g=u for OpenShift compatibility
+# Clean up apt cache and remove unnecessary files
+# add a+rw permissions to the home directory to ensure Cruise Control writable for logs
+RUN apt-get update && apt-get upgrade -y; \
+    groupadd -r -g 1001 cruise-control; \
+    useradd -m -d $HOME -s /bin/bash -u 1001 -r -g cruise-control cruise-control; \
+    chown -R cruise-control:0 $HOME; \
+    chmod -R g=u $HOME; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
+    chmod a+rw -R .
+
 # Set the user to cruise-control
 USER cruise-control
 
-# Ensure Cruise Control writable for logs
-RUN chmod a+rw -R .
-
-RUN ["chmod", "+x", "/opt/cruise-control/config/entrypoint.sh"]
-RUN ["chmod", "+x", "/opt/cruise-control/config/merge_custom_config.sh"]
-
-ENTRYPOINT ["/opt/cruise-control/config/entrypoint.sh"]
 EXPOSE 9090
+ENTRYPOINT ["/opt/cruise-control/config/entrypoint.sh"]
