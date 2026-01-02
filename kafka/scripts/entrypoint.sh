@@ -6,6 +6,7 @@ final_config="/opt/kafka/config/server.properties"
 kafka_config_dir="/opt/kafka/config/kafkaconfig"
 operator_config="/opt/kafka/config/kafkaconfig/config.properties"
 # KubeDB operator configuration files
+temp_apply_config="/opt/kafka/config/temp-config/apply.config.properties"
 temp_operator_config="/opt/kafka/config/temp-config/config.properties"
 temp_ssl_config="/opt/kafka/config/temp-config/ssl.properties"
 temp_clientauth_config="/opt/kafka/config/temp-config/clientauth.properties"
@@ -108,6 +109,8 @@ elif [[ $roles = "broker" ]]; then
 else [[ $roles = "controller,broker" ]]
   /opt/kafka/config/merge_custom_config.sh $server_custom_config $operator_config $kafka_config_dir/config.properties.merged
 fi
+# If a file named $temp_apply_config exists, it merges the file with the operator configuration file(apply config)
+/opt/kafka/config/merge_custom_config.sh $temp_apply_config $operator_config $kafka_config_dir/config.properties.merged
 
 # If a file named $temp_clientauth_config exists, it copies the file to /opt/kafka/config directory.
 if [[ -f $temp_clientauth_config ]]; then
