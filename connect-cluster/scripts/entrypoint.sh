@@ -9,7 +9,7 @@ connect_log4j_config="/opt/kafka/config/connect-log4j.properties"
 # Created by Kafka Connect Operator
 operator_connect_config_dir="/opt/kafka/config/connect-operator-config"
 operator_connect_config="/opt/kafka/config/connect-operator-config/config.properties"
-operator_apply_config="/opt/kafka/config/connect-operator-config/apply.config.properties"
+operator_inline_config="/opt/kafka/config/connect-operator-config/inline-config.properties"
 # Set the directory where the Kafka Connect Custom configuration files are located 
 # Created by User using Kubernetes Secret (Connect .spec.configSecret)
 custom_connect_config_dir="/opt/kafka/config/connect-custom-config"
@@ -78,7 +78,7 @@ fi
 if [[ $CONNECT_CLUSTER_MODE = "standalone" ]]; then
     /opt/kafka/scripts/merge_config_properties.sh $temp_custom_connect_config $temp_operator_connect_config $connect_config_dir/connect-standalone.properties.merged
     /opt/kafka/scripts/merge_config_properties.sh $temp_operator_connect_config $connect_standalone_config $connect_config_dir/connect-standalone.properties.merged
-    /opt/kafka/scripts/merge_config_properties.sh $operator_apply_config $connect_standalone_config $connect_config_dir/connect-standalone.properties.merged
+    /opt/kafka/scripts/merge_config_properties.sh $operator_inline_config $connect_standalone_config $connect_config_dir/connect-standalone.properties.merged
     remove_comments_and_sort $connect_standalone_config
     
     echo "Starting Kafka Connect in Standalone mode"
@@ -87,7 +87,7 @@ else [[ $CONNECT_CLUSTER_MODE = "distributed" ]]
     update_advertised_host_name $temp_operator_connect_config
     /opt/kafka/scripts/merge_config_properties.sh  $temp_custom_connect_config $temp_operator_connect_config $connect_config_dir/connect-distributed.properties.merged
     /opt/kafka/scripts/merge_config_properties.sh  $temp_operator_connect_config $connect_distributed_config $connect_config_dir/connect-distributed.properties.merged
-    /opt/kafka/scripts/merge_config_properties.sh  $operator_apply_config $connect_distributed_config $connect_config_dir/connect-distributed.properties.merged
+    /opt/kafka/scripts/merge_config_properties.sh  $operator_inline_config $connect_distributed_config $connect_config_dir/connect-distributed.properties.merged
     remove_comments_and_sort $connect_distributed_config
     
     echo "Starting Kafka Connect in Distributed mode"
