@@ -12,7 +12,6 @@ KAFKA_VERSION    ?= 4.2.0
 SCALA_VERSION    ?= 2.13
 KAFKA_REGISTRY   ?= https://archive.apache.org/dist/kafka
 KAFKA_URL		 ?= $(KAFKA_REGISTRY)/$(KAFKA_VERSION)/kafka_$(SCALA_VERSION)-$(KAFKA_VERSION).tgz
-CC_VERSION       ?= 3.0.3
 
 container-%:
 	@$(MAKE) container \
@@ -31,8 +30,7 @@ all-push: $(addprefix push-, $(subst /,_,$(DOCKER_PLATFORMS)))
 .PHONY: container
 container:
 	@echo "container: $(IMAGE):$(VERSION)"
-	@docker buildx build --build-arg "CC_VERSION=$(CC_VERSION)" \
-                         --build-arg "KAFKA_VERSION=$(KAFKA_VERSION)" \
+	@docker buildx build --build-arg "KAFKA_VERSION=$(KAFKA_VERSION)" \
                          --build-arg "SCALA_VERSION=$(SCALA_VERSION)" \
                          --build-arg "KAFKA_REGISTRY=$(KAFKA_REGISTRY)" \
                          --build-arg "KAFKA_URL=$(KAFKA_URL)" \
