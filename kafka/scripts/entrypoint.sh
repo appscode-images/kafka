@@ -10,6 +10,7 @@ temp_apply_config="/opt/kafka/config/temp-config/apply.config.properties"
 temp_operator_config="/opt/kafka/config/temp-config/config.properties"
 temp_ssl_config="/opt/kafka/config/temp-config/ssl.properties"
 temp_clientauth_config="/opt/kafka/config/temp-config/clientauth.properties"
+external_listeners_config="/opt/kafka/config/temp-config/external-listeners.properties"
 # Kafka KRaft configuration files
 controller_config="/opt/kafka/config/kraft/controller.properties"
 broker_config="/opt/kafka/config/kraft/broker.properties"
@@ -85,6 +86,17 @@ update_advertised_listeners() {
           modified_elements+=("$element")  # Skip modification
         fi
   done
+  # The operator mounts this file only when external access is enabled. It has one
+  # <pod-name>=EXTERNAL://<address>:<port> line per broker.
+  if [[ -f "$external_listeners_config" ]]; then
+    external_listener=$(grep "^$HOSTNAME=" "$external_listeners_config" | cut -d'=' -f 2-)
+    # Starting without it would leave this broker unreachable for external clients after bootstrap
+    if [[ -z "$external_listener" ]]; then
+      echo "Error: no external listener found for $HOSTNAME in $external_listeners_config" >&2
+      exit 1
+    fi
+    modified_elements+=("$external_listener")
+  fi
   # Join the modified elements into a string using commas as delimiters
   output_string=$(IFS=','; echo "${modified_elements[*]}")
   advertised_listeners=$output_string
