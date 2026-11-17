@@ -38,6 +38,7 @@ ARG SCALA_VERSION
 ARG KAFKA_REGISTRY
 ARG CC_VERSION
 ARG TARGETARCH
+ARG KAFKACTL_VERSION=5.21.0
 ENV HOME=/opt/kafka
 ENV PATH=${PATH}:${HOME}/bin
 
@@ -52,10 +53,9 @@ RUN apt-get update && apt-get upgrade -y \
  && mv /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION} ${HOME} \
  && rm -rf /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
  && rm -rf ${HOME}/bin/windows ${HOME}/site-docs \
- && latest_version=$(curl -s https://api.github.com/repos/deviceinsight/kafkactl/releases/latest | grep "tag_name" | cut -d '"' -f 4 | sed 's/^v//') \
- && curl -LO "https://github.com/deviceinsight/kafkactl/releases/download/v${latest_version}/kafkactl_${latest_version}_linux_${TARGETARCH}.deb" \
- && dpkg -i kafkactl_${latest_version}_linux_${TARGETARCH}.deb \
- && rm kafkactl_${latest_version}_linux_${TARGETARCH}.deb
+ && curl -fLO "https://github.com/deviceinsight/kafkactl/releases/download/v${KAFKACTL_VERSION}/kafkactl_${KAFKACTL_VERSION}_linux_${TARGETARCH}.deb" \
+ && dpkg -i kafkactl_${KAFKACTL_VERSION}_linux_${TARGETARCH}.deb \
+ && rm kafkactl_${KAFKACTL_VERSION}_linux_${TARGETARCH}.deb
 
 # Placing the Cruise Control metric reporter jar into the /opt/kafka/libs/ directory of every Kafka broker
 # allows Kafka to find the reporter at runtime
